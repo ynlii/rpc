@@ -1,7 +1,10 @@
 import socket
 import select
+import struct
 import multiprocessing
-from unicodedata import name
+
+import simulator
+
 
 LOCK = 0
 R_LOCK = 1
@@ -16,7 +19,7 @@ class Worker(object):
         self.lock = LOCK
         self.worker_sock = self.create_sock(address)
         self.master_sock = None
-    
+
     @staticmethod
     def create_sock(address):
         """ 创建与master通信的socket
@@ -28,7 +31,7 @@ class Worker(object):
         sock.bind(address)
         sock.listen(10000)
         return sock
-    
+
     def run(self):
         """ woker进程
 
@@ -63,11 +66,12 @@ class Worker(object):
                         # 接收数据
                         f = fd.recv(300)
                         if f:
-                            head = int.from_bytes(f[0:4],byteorder='big')
-                            typ = eval(f[4:])[0]
-                            id = eval(f[4:])[1]
-                            content = eval(f[4:])[2]
-                            print("client %s request: len-%s type-%s id-%s content-%s" % (self.name, head, typ, id, content))
+                            result = exec(f)
+                            # head = int.from_bytes(f[0:4],byteorder='big')
+                            # typ = eval(f[4:])[0]
+                            # id = eval(f[4:])[1]
+                            # content = eval(f[4:])[2]
+                            # print("client %s request: len-%s type-%s id-%s content-%s" % (self.name, head, typ, id, content))
                             # print("client %s request:%s" % (self.name, f.decode('gbk')))
 
                         else:
@@ -78,3 +82,66 @@ class Worker(object):
         """启动一个worker子进程
         """
         return multiprocessing.Process(name="worker_"+str(self.name), target=self.run)
+
+    def exec(data):
+        head = int.from_bytes(data[0:4],byteorder='big')
+        typ = eval(data[4:])[0]
+        sid = eval(data[4:])[1]
+        content = eval(data[4:])[2]
+
+        msgid = 0
+        result = ''
+        get_method = content[0]
+
+        if get_method == 'init':
+            """init(self, sid, **sim_params)"""
+            sid = content[1][0]
+            kwargs = content[1][-1]
+            result = simulator.Simulator.init(sid, kwargs)
+
+        elif get_method == 'create':
+            """create(self, num, model, **model_params)"""
+            num = content[1][0]
+            model = content[1][1]
+            kwargs = content[1][-1]
+            simulator.Simulator.create(num, model, kwargs)
+            
+
+        elif get_method == 'setup_done':
+            """setup_done(self)"""
+            simulator.Simulator.setup_done()
+            
+
+        elif get_method == 'step':
+            """step(self, time, inputs)"""
+            time = content[1][0]
+            inputs = content[1][1]
+            simulator.Simulator.step(time)
+            
+
+        elif get_method == 'get_data':
+            """get_data(self, outputs)"""
+            outputs = content[1][0]
+            simulator.Simulator.get_data(outputs)
+            
+
+        elif get_method == 'finalize':
+            """finalize(self)"""
+            simulator.Simulator.finalize()
+
+
+        else:
+            msgid = 2
+            result = "Error in your code"
+        Worker.reply_msg(msgid, sid, result)
+
+    def reply_msg(msgid, sid, result):
+        rep = []
+        req_msg_id = sid
+        rep.append(msgid)
+        rep.append(req_msg_id)
+        rep.append(result)
+        length = struct.pack('>i',len(rep))
+        msg = str(length)+str(rep)
+        return msg
+        # rep -> [0, 42, result]
